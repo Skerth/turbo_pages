@@ -6,6 +6,9 @@
 
 define('PATH_TURBO_PAGES_RSS', DRUPAL_ROOT . '/sites/default/files/turbo_pages');
 
+/**
+ * Implements hook_disable().
+ */
 function turbo_pages_disable() {
   unlink(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss');
   rmdir(PATH_TURBO_PAGES_RSS);
@@ -39,6 +42,11 @@ function turbo_pages_menu() {
   return $items;
 }
 
+/**
+ * @param $form
+ *
+ * @return mixed
+ */
 function turbo_pages_form_config($form) {
   global $base_url;
 
@@ -108,6 +116,7 @@ function turbo_pages_form_config($form) {
     '#title' => t('Username field'),
     '#options' => ['none' => t('None')] + $text_field_list,
     '#default_value' =>  variable_get('turbo_pages_username_field', 'none'),
+    '#description' => t('The field from which the value of the author will be taken. The default will be <em>$node->name</em>.'),
   );
 
   $form['creating_rss'] = array(
@@ -251,7 +260,6 @@ function turbo_pages_cron() {
       _create_rss();
     }
   }
-
 }
 
 /**
@@ -297,6 +305,9 @@ function _create_rss() {
   watchdog('turbo_pages', 'RSS created');
 }
 
+/**
+ * @param $rss_content
+ */
 function _minify_rss(&$rss_content) {
   $search = array(
     '/\>[^\S ]+/s',     // strip whitespaces after tags, except space
@@ -316,6 +327,9 @@ function _minify_rss(&$rss_content) {
   $rss_content = preg_replace($search, $replace, $rss_content);
 }
 
+/**
+ *
+ */
 function _generate_content_rss(){
   $uid = NULL;
   $nodes = array();
@@ -389,20 +403,27 @@ function _generate_content_rss(){
   );
 }
 
+/**
+ * @return mixed
+ */
 function _get_content_rss() {
   $node_types = variable_get('turbo_pages_content_types', FALSE);
 
-  $query = new EntityFieldQuery();
-  $query->entityCondition('entity_type', 'node');
-  $query->propertyCondition('status', 1);
-  $query->propertyCondition('type', $node_types);
-  $result = $query->execute();
+  $query = db_select('node', 'n');
+  $query->fields('n', array('nid', 'nid'))
+    ->condition('n.status', 1)
+    ->condition('n.type', $node_types)
+    ->orderBy('n.uid', 'ASC');
+  $result = $query->execute()->fetchAllKeyed();
 
-  $nodes = node_load_multiple(array_keys($result['node']));
+  $nodes = node_load_multiple($result);
 
   return $nodes;
 }
 
+/**
+ *
+ */
 function _get_rss() {
   drupal_add_http_header('Content-Type', 'application/rss+xml; charset=utf-8');
   print file_get_contents(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss');

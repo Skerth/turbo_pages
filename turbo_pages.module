@@ -1,0 +1,398 @@
+<?php
+/**
+ * @file
+ * A description of what your module does.
+ */
+
+define('PATH_TURBO_PAGES_RSS', DRUPAL_ROOT . '/sites/default/files/turbo_pages');
+
+function turbo_pages_disable() {
+  unlink(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss');
+  rmdir(PATH_TURBO_PAGES_RSS);
+  drupal_set_message('Директория <em>' . PATH_TURBO_PAGES_RSS . '</em> удалена');
+}
+
+/**
+ * Implements hook_menu().
+ */
+function turbo_pages_menu() {
+  $items = array();
+
+  $items['admin/config/search/turbo_pages'] = array(
+    'title' => 'Yandex Turbo pages',
+    'description' => 'Config module Yandex Turbo pages.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('turbo_pages_form_config'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
+    'weight' => 20,
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $rss_url = variable_get('turbo_pages_rss_url', 'turbo-pages.rss');
+  $items[$rss_url] = array(
+    'page callback' => '_get_rss',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+function turbo_pages_form_config($form) {
+  global $base_url;
+
+  $path_rss = PATH_TURBO_PAGES_RSS . '/turbo_pages.rss';
+  $field_list = _get_col_from_db('field_config', 'field_name');
+
+  $form['channel'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Channel'),
+    '#weight' => 0,
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+    '#tree' => FALSE,
+  );
+
+  $form['channel']['turbo_pages_rss_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('RSS url'),
+    '#default_value' => variable_get('turbo_pages_rss_url', 'turbo-pages.rss'),
+    '#field_prefix' => $base_url . '/',
+  );
+
+  $form['channel']['turbo_pages_channel_title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Channel title'),
+    '#default_value' => variable_get('turbo_pages_channel_title', NULL),
+  );
+
+  $form['channel']['turbo_pages_channel_description'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Channel description'),
+    '#default_value' => variable_get('turbo_pages_channel_description', NULL),
+  );
+
+  $form['channel']['turbo_pages_content_types'] = array(
+    '#title' => t('Content types'),
+    '#required' => TRUE,
+    '#description' => t('Binds turbo pages to specified types of materials.'),
+    '#type' => 'checkboxes',
+    '#options' => _get_col_from_db('node_type', 'type', 'name'),
+    '#default_value' => variable_get('turbo_pages_content_types', ''),
+  );
+
+  $form['channel']['turbo_pages_content_fields'] = array(
+    '#type' => 'select',
+    '#required' => TRUE,
+    '#multiple' => TRUE,
+    '#title' => t('Content field'),
+    '#options' => $field_list,
+    '#default_value' =>  variable_get('turbo_pages_content_fields', ''),
+    '#description' => t('The field where to take content.'),
+  );
+
+  $form['channel']['turbo_pages_username_field'] = array(
+    '#type' => 'select',
+    '#title' => t('Username field'),
+    '#options' => ['none' => t('None')] + $field_list,
+    '#default_value' =>  variable_get('turbo_pages_username_field', 'none'),
+  );
+
+  $form['creating_rss'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Creating RSS file'),
+    '#weight' => 1,
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+    '#tree' => FALSE,
+  );
+
+  $form['creating_rss']['turbo_pages_enable_cron'] = array(
+    '#title' => t('Create by cron'),
+    '#type' => 'checkbox',
+    '#default_value' => variable_get('turbo_pages_enable_cron', ''),
+  );
+
+  $form['creating_rss']['turbo_pages_rss_update_frequency'] = array(
+    '#type' => 'select',
+    '#title' => t('Update frequency'),
+    '#options' => array(
+      86400 => t('Every 1 day'),
+      604800 => t('Every 7 day'),
+      2592000 => t('Every 30 day'),
+      0 => t('Custom')
+    ),
+    '#default_value' => variable_get('turbo_pages_rss_update_frequency', ''),
+    '#states' => array(
+      'visible' => array(
+        'input[name="turbo_pages_enable_cron"]' => array(
+          'checked' => TRUE,
+        ),
+      ),
+    ),
+  );
+
+  $form['creating_rss']['turbo_pages_rss_update_frequency_custom'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Custom'),
+    '#default_value' => variable_get('turbo_pages_rss_update_frequency_custom', ''),
+    '#states' => array(
+      'visible' => array(
+        'select[name="turbo_pages_rss_update_frequency"]' => array(
+          'value' => 0,
+        ),
+        'input[name="turbo_pages_enable_cron"]' => array(
+          'checked' => TRUE,
+        ),
+      ),
+      'required' => array(
+        'select[name="turbo_pages_rss_update_frequency"]' => array(
+          'value' => 0,
+        ),
+      ),
+    ),
+  );
+
+  $form['creating_rss']['turbo_pages_create_rss'] = array(
+    '#value' => t('Create RSS'),
+    '#type' => 'submit',
+    '#submit' => array('_create_rss'),
+  );
+
+  if (file_exists($path_rss)) {
+    $file_created = filemtime($path_rss);
+    $form['creating_rss']['turbo_pages_rss_created'] = array(
+      '#markup' => '<div class="description">' . t('Created') . ': <b>' . format_date($file_created, 'medium') . '</b></div>',
+    );
+  }
+
+  // Обработка получаемого контента
+  $form['content_processing'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Content Processing'),
+    '#weight' => 2,
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+    '#tree' => FALSE,
+  );
+
+  $form['content_processing']['turbo_pages_preg_replaces'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Preg replaces'),
+    '#description' => t('Enter each regular expression on a new line.'),
+    '#default_value' => variable_get('turbo_pages_preg_replaces', ''),
+  );
+
+  $form['content_processing']['turbo_pages_allowable_tags'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Allowable tags'),
+    '#default_value' => variable_get('turbo_pages_allowable_tags', '<p> <h2> <h3> <h4> <h5> <h6> <ul> <ol> <li> <blockquote> <div> <b> <strong> <em>'),
+  );
+
+  $form['content_processing']['turbo_pages_content_trim'] = array(
+    '#title' => t('Trim content to a maximum length '),
+    '#type' => 'checkbox',
+    '#default_value' => variable_get('turbo_pages_content_trim', ''),
+  );
+
+  $form['content_processing']['turbo_pages_content_max_length'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Maximum length'),
+    '#default_value' => variable_get('turbo_pages_content_max_length', ''),
+    '#states' => array(
+      'visible' => array(
+        'input[name="turbo_pages_content_trim"]' => array(
+          'checked' => TRUE,
+        ),
+      ),
+    ),
+  );
+
+  $form = system_settings_form($form);
+
+  return $form;
+}
+
+/**
+ * Implements hook_cron().
+ */
+function turbo_pages_cron() {
+  $flag_cron = variable_get('turbo_pages_enable_cron', NULL);
+
+  if ($flag_cron) {
+    $update_frequency = variable_get('turbo_pages_rss_update_frequency', NULL);
+
+    if (!(int)$update_frequency) {
+      $update_frequency = variable_get('turbo_pages_rss_update_frequency_custom', NULL);
+    }
+
+    $file_create = filemtime(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss');
+    $time = time();
+
+    if (($file_create + $update_frequency) < $time) {
+      _create_rss();
+    }
+  }
+
+}
+
+/**
+ * Implement hook_theme().
+ */
+function turbo_pages_theme() {
+  return array(
+    'turbo_pages__rss' => array(
+      'template' => 'templates/turbo-pages--rss',
+      'variables' => array(
+        'channel_title' => NULL,
+        'channel_description' => NULL,
+        'nodes' => NULL,
+        'username_field' => NULL,
+      ),
+    ),
+  );
+}
+
+/**
+ * Создает или перезаписывает файл
+ */
+function _create_rss() {
+  if (!is_dir(PATH_TURBO_PAGES_RSS)) {
+    mkdir(PATH_TURBO_PAGES_RSS, 0755);
+  }
+
+  // Открываем файл, флаг W означает - файл открыт на запись
+  $file_rss = fopen(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss', 'w');
+  // Перенос строки - \r\n
+
+  $rss_content = _generate_content_rss();
+
+  fwrite($file_rss, $rss_content);
+  // Закрывает открытый файл
+  fclose($file_rss);
+
+  watchdog('turbo_pages', 'RSS created');
+}
+
+function _generate_content_rss(){
+  $nodes = _get_content_rss();
+
+  $channel_title = variable_get('turbo_pages_channel_title', NULL);
+  $channel_description = variable_get('turbo_pages_channel_description', NULL);
+
+  $fields = variable_get('turbo_pages_content_fields', FALSE);
+  $username_field = variable_get('turbo_pages_username_field', 'none');
+
+  $pregs = _converting_string_to_array(variable_get('turbo_pages_preg_replaces', ''));
+
+  if ($username_field != 'none') {
+    $username_field = $username_field . '_value';
+  }
+  else {
+    $username_field = 'name';
+  }
+
+  foreach ($nodes as $key => $node) {
+    foreach ($fields as $field) {
+      $field = $field . '_value';
+      $nodes[$key]->$field = strip_tags($nodes[$key]->$field, variable_get('turbo_pages_allowable_tags', ''));
+      // TODO: обработка изображений и обертка в <figure>
+      //$nodes[$key]->$field = str_replace('<img src='/', '<img src='' . $GLOBALS['base_url'] . '/', $nodes[$key]->$field);
+
+      if(!empty($pregs[0])) {
+        foreach ($pregs as $preg) {
+          $nodes[$key]->$field = preg_replace(trim($preg), '', $nodes[$key]->body_value);
+        }
+      }
+    }
+  }
+
+  return theme('turbo_pages__rss',
+    array(
+      'channel_title' => $channel_title,
+      'channel_description' => $channel_description,
+      'nodes' => $nodes,
+      'username_field' => $username_field,
+    )
+  );
+}
+
+function _get_content_rss() {
+  $node_types = variable_get('turbo_pages_content_types', FALSE);
+  $fields = variable_get('turbo_pages_content_fields', FALSE);
+  $username_field = variable_get('turbo_pages_username_field', 'none');
+
+  $query = db_select('node', 'n');
+  $query->leftJoin('users', 'u', 'n.uid = u.uid');
+
+  if ($username_field != 'none') {
+    $query->leftJoin('field_data_' . $username_field, 'username', 'u.uid = username.entity_id');
+  }
+
+  foreach ($fields as $field) {
+    $query->leftJoin('field_data_' . $field, $field, 'n.nid = ' . $field . '.entity_id');
+  }
+
+  $query->fields('n', array('nid', 'title', 'created'));
+  $query->fields('u', array('name'));
+
+  if ($username_field != 'none') {
+    $query->fields('username', array($username_field . '_value'));
+  }
+
+  foreach ($fields as $field) {
+    $query->fields($field, array($field . '_value'));
+  }
+
+  $query->condition('n.status', 1);
+  $query->condition('n.type', $node_types);
+
+  $nodes = $query->execute()->fetchAll();
+
+  return $nodes;
+}
+
+function _get_rss() {
+  drupal_add_http_header('Content-Type', 'application/rss+xml; charset=utf-8');
+  print file_get_contents(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss');
+
+  exit();
+}
+
+/**
+ * Получение списка типов содержимого из таблицы `$table` в
+ * виде ассоциативного массива, где ключ = $col1, а значение = $col2.
+ *
+ * @return mixed - двумерный ассоциативный массив:
+ */
+function _get_col_from_db($table, $col1, $col2 = null) {
+  if (!$col2) {
+    $col2 = $col1;
+  }
+
+  $columns = db_select($table, 't')
+    ->fields('t', array($col1, $col2))
+    ->execute()
+    ->fetchAllKeyed();
+
+  return $columns;
+}
+
+/**
+ * @param $string_replacers
+ *
+ * @return array
+ */
+function _converting_string_to_array($string) {
+  return explode(PHP_EOL, $string);
+}
+
+/**
+ * @param $array_replacers
+ *
+ * @return string
+ */
+function _converting_array_to_string($array) {
+  return implode(PHP_EOL, $array);
+}

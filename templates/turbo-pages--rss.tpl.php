@@ -8,15 +8,20 @@
 
     <?php foreach ($nodes as $node): ?>
       <item turbo="true">
-        <link><?php print 'https://dovir-finance.ru' . url('node/' . $node->nid/*, array('absolute' => TRUE)*/); ?></link>
+        <link><?php print $node->url; ?></link>
         <pubDate><?php print date(DATE_RFC822, $node->created); ?></pubDate>
-        <author><?php print $node->$username_field; ?></author>
+        <author><?php print $node->username; ?></author>
         <turbo:content>
           <![CDATA[
           <header>
-             <h1><?php print $node->title; ?></h1>
+            <h1><?php print $node->title; ?></h1>
+            <?php if(isset($node->image_preview)): ?>
+              <figure>
+                <img src="<?php print $node->image_preview ?>" />
+              </figure>
+            <?php endif; ?>
           </header>
-          <?php print $node->body_value; ?>
+          <?php print $node->content; ?>
           ]]>
         </turbo:content>
       </item>

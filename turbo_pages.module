@@ -43,7 +43,8 @@ function turbo_pages_form_config($form) {
   global $base_url;
 
   $path_rss = PATH_TURBO_PAGES_RSS . '/turbo_pages.rss';
-  $field_list = _get_col_from_db('field_config', 'field_name');
+  $text_field_list = _get_col_from_db('field_config', 'field_name', NULL, array('module' => array('text')));
+  $image_field_list = _get_col_from_db('field_config', 'field_name', NULL, array('module' => array('image')));
 
   $form['channel'] = array(
     '#type' => 'fieldset',
@@ -87,15 +88,25 @@ function turbo_pages_form_config($form) {
     '#required' => TRUE,
     '#multiple' => TRUE,
     '#title' => t('Content field'),
-    '#options' => $field_list,
+    '#options' => $text_field_list,
     '#default_value' =>  variable_get('turbo_pages_content_fields', ''),
     '#description' => t('The field where to take content.'),
+  );
+
+  $form['channel']['turbo_pages_content_image_field'] = array(
+    '#type' => 'select',
+    '#required' => FALSE,
+    '#multiple' => FALSE,
+    '#title' => t('Image field'),
+    '#options' => ['none' => t('None')] + $image_field_list,
+    '#default_value' =>  variable_get('turbo_pages_content_image_field', ''),
+    '#description' => t('The image displayed above the content. The first image is taken, with more than one.'),
   );
 
   $form['channel']['turbo_pages_username_field'] = array(
     '#type' => 'select',
     '#title' => t('Username field'),
-    '#options' => ['none' => t('None')] + $field_list,
+    '#options' => ['none' => t('None')] + $text_field_list,
     '#default_value' =>  variable_get('turbo_pages_username_field', 'none'),
   );
 
@@ -191,9 +202,9 @@ function turbo_pages_form_config($form) {
   );
 
   $form['content_processing']['turbo_pages_content_trim'] = array(
-    '#title' => t('Trim content to a maximum length '),
+    '#title' => t('Trim content to a maximum length'),
     '#type' => 'checkbox',
-    '#default_value' => variable_get('turbo_pages_content_trim', ''),
+    '#default_value' => variable_get('turbo_pages_content_trim', FALSE),
   );
 
   $form['content_processing']['turbo_pages_content_max_length'] = array(
@@ -207,6 +218,12 @@ function turbo_pages_form_config($form) {
         ),
       ),
     ),
+  );
+
+  $form['content_processing']['turbo_pages_rss_minify'] = array(
+    '#title' => t('Minify RSS'),
+    '#type' => 'checkbox',
+    '#default_value' => variable_get('turbo_pages_rss_minify', FALSE),
   );
 
   $form = system_settings_form($form);
@@ -248,7 +265,6 @@ function turbo_pages_theme() {
         'channel_title' => NULL,
         'channel_description' => NULL,
         'nodes' => NULL,
-        'username_field' => NULL,
       ),
     ),
   );
@@ -258,15 +274,21 @@ function turbo_pages_theme() {
  * Создает или перезаписывает файл
  */
 function _create_rss() {
+  $flag_minify = variable_get('turbo_pages_rss_minify', FALSE);
+
   if (!is_dir(PATH_TURBO_PAGES_RSS)) {
     mkdir(PATH_TURBO_PAGES_RSS, 0755);
+  }
+  // Перенос строки - \r\n
+
+  $rss_content = _generate_content_rss();
+
+  if($flag_minify) {
+    _minify_rss($rss_content);
   }
 
   // Открываем файл, флаг W означает - файл открыт на запись
   $file_rss = fopen(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss', 'w');
-  // Перенос строки - \r\n
-
-  $rss_content = _generate_content_rss();
 
   fwrite($file_rss, $rss_content);
   // Закрывает открытый файл
@@ -275,37 +297,87 @@ function _create_rss() {
   watchdog('turbo_pages', 'RSS created');
 }
 
+function _minify_rss(&$rss_content) {
+  $search = array(
+    '/\>[^\S ]+/s',     // strip whitespaces after tags, except space
+    '/[^\S ]+\</s',     // strip whitespaces before tags, except space
+    '/(\s)+/s',         // shorten multiple whitespace sequences
+    '/<!--(.|\s)*?-->/', // Remove HTML comments
+  );
+
+  $replace = array(
+    '>',
+    '<',
+    '\\1',
+    '',
+  );
+
+  $rss_content = str_replace('  ', '', $rss_content);
+  $rss_content = preg_replace($search, $replace, $rss_content);
+}
+
 function _generate_content_rss(){
-  $nodes = _get_content_rss();
+  $uid = NULL;
+  $nodes = array();
+  $drupal_nodes = _get_content_rss();
 
   $channel_title = variable_get('turbo_pages_channel_title', NULL);
   $channel_description = variable_get('turbo_pages_channel_description', NULL);
 
-  $fields = variable_get('turbo_pages_content_fields', FALSE);
+  $content_fields = variable_get('turbo_pages_content_fields', FALSE);
+  $image_field = variable_get('turbo_pages_content_image_field', 'none');
   $username_field = variable_get('turbo_pages_username_field', 'none');
 
   $pregs = _converting_string_to_array(variable_get('turbo_pages_preg_replaces', ''));
 
-  if ($username_field != 'none') {
-    $username_field = $username_field . '_value';
-  }
-  else {
-    $username_field = 'name';
-  }
+  foreach($drupal_nodes as $key => $node) {
+    // Сборка и вычищение нужных полей ноды
+    $nodes[$key] = new stdClass();
+    $nodes[$key]->nid = $node->nid;
+    $nodes[$key]->title = $node->title;
+    $nodes[$key]->created = $node->created;
+    $nodes[$key]->url = url('node/' . $node->nid, array('absolute' => TRUE));
 
-  foreach ($nodes as $key => $node) {
-    foreach ($fields as $field) {
-      $field = $field . '_value';
-      $nodes[$key]->$field = strip_tags($nodes[$key]->$field, variable_get('turbo_pages_allowable_tags', ''));
+    if($image_field != 'none') {
+      $image_preview = field_get_items('node' , $node, $image_field);
+      $image_preview = field_view_value( 'node' , $node, $image_field, $image_preview[0]);
+
+      $nodes[$key]->image_preview = image_style_url('large', $image_preview['#item']['uri']);
+    }
+
+    if($username_field != 'none') {
+
+      if($uid != $node->uid) {
+        $user = user_load($node->uid);
+        $username = field_get_items('user' , $user, $username_field);
+        $username = field_view_value( 'user' , $user, $username_field, $username[0]);
+        $username = $username['#markup'];
+      }
+
+      $nodes[$key]->username = $username;
+    }
+    else {
+      $nodes[$key]->username = $node->name;
+    }
+
+    foreach($content_fields as $field) {
+      $content = field_get_items('node' , $node, $field);
+      $content = field_view_value( 'node' , $node, $field, $content[0]);
+      $content = $content['#markup'];
+      $content = strip_tags($content, variable_get('turbo_pages_allowable_tags', ''));
+
       // TODO: обработка изображений и обертка в <figure>
       //$nodes[$key]->$field = str_replace('<img src='/', '<img src='' . $GLOBALS['base_url'] . '/', $nodes[$key]->$field);
-
       if(!empty($pregs[0])) {
         foreach ($pregs as $preg) {
-          $nodes[$key]->$field = preg_replace(trim($preg), '', $nodes[$key]->body_value);
+          $content = preg_replace(trim($preg), '', $content);
         }
       }
+
+      $nodes[$key]->content = $content;
     }
+
+    $uid = $node->uid;
   }
 
   return theme('turbo_pages__rss',
@@ -313,42 +385,20 @@ function _generate_content_rss(){
       'channel_title' => $channel_title,
       'channel_description' => $channel_description,
       'nodes' => $nodes,
-      'username_field' => $username_field,
     )
   );
 }
 
 function _get_content_rss() {
   $node_types = variable_get('turbo_pages_content_types', FALSE);
-  $fields = variable_get('turbo_pages_content_fields', FALSE);
-  $username_field = variable_get('turbo_pages_username_field', 'none');
 
-  $query = db_select('node', 'n');
-  $query->leftJoin('users', 'u', 'n.uid = u.uid');
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'node');
+  $query->propertyCondition('status', 1);
+  $query->propertyCondition('type', $node_types);
+  $result = $query->execute();
 
-  if ($username_field != 'none') {
-    $query->leftJoin('field_data_' . $username_field, 'username', 'u.uid = username.entity_id');
-  }
-
-  foreach ($fields as $field) {
-    $query->leftJoin('field_data_' . $field, $field, 'n.nid = ' . $field . '.entity_id');
-  }
-
-  $query->fields('n', array('nid', 'title', 'created'));
-  $query->fields('u', array('name'));
-
-  if ($username_field != 'none') {
-    $query->fields('username', array($username_field . '_value'));
-  }
-
-  foreach ($fields as $field) {
-    $query->fields($field, array($field . '_value'));
-  }
-
-  $query->condition('n.status', 1);
-  $query->condition('n.type', $node_types);
-
-  $nodes = $query->execute()->fetchAll();
+  $nodes = node_load_multiple(array_keys($result['node']));
 
   return $nodes;
 }
@@ -364,16 +414,28 @@ function _get_rss() {
  * Получение списка типов содержимого из таблицы `$table` в
  * виде ассоциативного массива, где ключ = $col1, а значение = $col2.
  *
+ * @param $table
+ * @param $col1
+ * @param null $col2
+ * @param array $conditions
+ *
  * @return mixed - двумерный ассоциативный массив:
  */
-function _get_col_from_db($table, $col1, $col2 = null) {
+function _get_col_from_db($table, $col1, $col2 = NULL, $conditions = array()) {
   if (!$col2) {
     $col2 = $col1;
   }
 
-  $columns = db_select($table, 't')
-    ->fields('t', array($col1, $col2))
-    ->execute()
+  $query = db_select($table, 't');
+  $query->fields('t', array($col1, $col2));
+
+  if(isset($conditions['module'])) {
+    foreach ($conditions['module'] as $condition) {
+      $query->condition('module', $condition);
+    }
+  }
+
+  $columns = $query->execute()
     ->fetchAllKeyed();
 
   return $columns;

@@ -11,7 +11,9 @@
 function turbo_pages_disable() {
   unlink(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss');
   rmdir(PATH_TURBO_PAGES_RSS);
-  drupal_set_message('Директория <em>' . PATH_TURBO_PAGES_RSS . '</em> удалена');
+  drupal_set_message(t('Directory <em>@dir</em> removed', array(
+    '@dir' => PATH_TURBO_PAGES_RSS,
+  )));
 }
 
 /**
@@ -19,6 +21,5 @@ function turbo_pages_disable() {
  */
 function turbo_pages_uninstall() {
   // Unset turbo_pages variables.
-  // TODO: удаление всех переменных.
   variable_del('turbo_pages_rss_url');
 }

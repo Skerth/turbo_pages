@@ -90,8 +90,8 @@ function _turbo_pages_create_rss() {
   $rss_content = _turbo_pages_generate_content_rss();
 
   $flag_minify = variable_get('turbo_pages_rss_minify', FALSE);
-  if($flag_minify) {
-    _turbo_pages_minify_rss($rss_content);
+  if ($flag_minify) {
+    $rss_content = _turbo_pages_minify_rss($rss_content);
   }
 
   $file_rss = fopen(PATH_TURBO_PAGES_RSS . '/turbo_pages.rss', 'w');
@@ -105,30 +105,40 @@ function _turbo_pages_create_rss() {
  * Content minify before adding to file. Removes spaces and line breaks.
  *
  * @param $rss_content
+ *
+ * @return mixed
  */
-function _turbo_pages_minify_rss(&$rss_content) {
-  $search = array(
-    '/\>[^\S ]+/s',     // strip whitespaces after tags, except space
-    '/[^\S ]+\</s',     // strip whitespaces before tags, except space
-    '/(\s)+/s',         // shorten multiple whitespace sequences
-    '/<!--(.|\s)*?-->/', // Remove HTML comments
-  );
+function _turbo_pages_minify_rss($rss_content) {
+  // Minify HTML integration for RSS file generation.
+  if (module_exists('minihtml')) {
+    $rss_content = _minihtml_html($rss_content);
+  }
+  else {
+    $search = array(
+      '/\>[^\S ]+/s',     // strip whitespaces after tags, except space
+      '/[^\S ]+\</s',     // strip whitespaces before tags, except space
+      '/(\s)+/s',         // shorten multiple whitespace sequences
+      '/<!--(.|\s)*?-->/', // Remove HTML comments
+    );
 
-  $replace = array(
-    '>',
-    '<',
-    '\\1',
-    '',
-  );
+    $replace = array(
+      '>',
+      '<',
+      '\\1',
+      '',
+    );
 
-  $rss_content = str_replace('  ', '', $rss_content);
-  $rss_content = preg_replace($search, $replace, $rss_content);
+    $rss_content = str_replace('  ', '', $rss_content);
+    $rss_content = preg_replace($search, $replace, $rss_content);
+  }
+
+  return $rss_content;
 }
 
 /**
  * Getting from the database and content processing.
  */
-function _turbo_pages_generate_content_rss(){
+function _turbo_pages_generate_content_rss() {
   $uid = NULL;
   $nodes = array();
 
@@ -145,23 +155,23 @@ function _turbo_pages_generate_content_rss(){
 
   module_load_include('inc', 'turbo_pages', 'includes/turbo_pages.db');
   $drupal_nodes = _turbo_pages_get_content_rss();
-  foreach($drupal_nodes as $key => $node) {
+  foreach ($drupal_nodes as $key => $node) {
     $nodes[$key] = new stdClass();
     $nodes[$key]->nid = $node->nid;
     $nodes[$key]->title = $node->title;
     $nodes[$key]->created = $node->created;
     $nodes[$key]->url = url('node/' . $node->nid, array('absolute' => TRUE));
 
-    if($image_field != 'none') {
+    if ($image_field != 'none') {
       $image_preview = field_get_items('node' , $node, $image_field);
       $image_preview = field_view_value( 'node' , $node, $image_field, $image_preview[0]);
 
       $nodes[$key]->image_preview = image_style_url('large', $image_preview['#item']['uri']);
     }
 
-    if($username_field != 'none') {
+    if ($username_field != 'none') {
 
-      if($uid != $node->uid) {
+      if ($uid != $node->uid) {
         $user = user_load($node->uid);
         $username = field_get_items('user' , $user, $username_field);
         $username = field_view_value( 'user' , $user, $username_field, $username[0]);
@@ -174,13 +184,13 @@ function _turbo_pages_generate_content_rss(){
       $nodes[$key]->username = $node->name;
     }
 
-    foreach($content_fields as $field) {
+    foreach ($content_fields as $field) {
       $content = field_get_items('node' , $node, $field);
       $content = field_view_value( 'node' , $node, $field, $content[0]);
       $content = $content['#markup'];
       $content = strip_tags($content, variable_get('turbo_pages_allowable_tags', ''));
 
-      if(!empty($preg_replaces[0])) {
+      if (!empty($preg_replaces[0])) {
         foreach ($preg_replaces as $preg) {
           $content = preg_replace(trim($preg), '', $content);
         }
@@ -202,7 +212,7 @@ function _turbo_pages_generate_content_rss(){
 }
 
 /**
- * Display file contents.
+ * Display RSS file contents.
  */
 function _turbo_pages_get_rss() {
   drupal_add_http_header('Content-Type', 'application/rss+xml; charset=utf-8');

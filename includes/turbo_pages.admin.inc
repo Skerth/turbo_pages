@@ -154,7 +154,7 @@ function turbo_pages_form_config($form) {
   $form['creating_rss']['turbo_pages_create_rss'] = array(
     '#type' => 'submit',
     '#value' => t('Create RSS'),
-    '#submit' => array('_create_rss'),
+    '#submit' => array('_turbo_pages_create_rss'),
   );
 
   // Displays information about the created file.

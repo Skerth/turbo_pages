@@ -22,6 +22,7 @@
             <?php endif; ?>
           </header>
           <?php print $node->content; ?>
+          <?php print $items_footer; ?>
           ]]>
         </turbo:content>
       </item>

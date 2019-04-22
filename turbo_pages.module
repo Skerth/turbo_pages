@@ -202,11 +202,14 @@ function _turbo_pages_generate_content_rss() {
     $uid = $node->uid;
   }
 
+  $items_footer = variable_get('turbo_pages_items_footer', '');
+
   return theme('turbo_pages__rss',
     array(
       'channel_title' => $channel_title,
       'channel_description' => $channel_description,
       'nodes' => $nodes,
+      'items_footer' => $items_footer,
     )
   );
 }

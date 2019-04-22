@@ -176,6 +176,13 @@ function turbo_pages_form_config($form) {
     '#tree' => FALSE,
   );
 
+  $form['content_processing']['turbo_pages_items_footer'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Item footer'),
+    '#default_value' => variable_get('turbo_pages_items_footer', ''),
+    '#description' => t('This text will be added to the basement of each item.'),
+  );
+
   $form['content_processing']['turbo_pages_preg_replaces'] = array(
     '#type' => 'textarea',
     '#title' => t('Preg replaces'),
